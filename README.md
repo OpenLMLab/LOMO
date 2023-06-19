@@ -15,6 +15,7 @@ LOMO is integrated with [CoLLiE](https://github.com/OpenLMLab/collie) library, w
 ```shell
 bash run.sh
 ```
+To change the model size, dataset or hyperparameters, please modify the files under `config`.
 
 ## Reproduce our results
 We provide the sampled datasets used in our experiments [here](https://drive.google.com/drive/folders/1zV7sXvU7YHKWyS3fYV0yyi7FyTjIpEuO?usp=sharing).
