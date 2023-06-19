@@ -11,7 +11,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 from transformers import set_seed
 from dataclasses import asdict
 from transformers.deepspeed import HfDeepSpeedConfig
-from peft import get_peft_model, TaskType, LoraConfig
 import wandb
 # os.environ['WANDB_MODE'] = 'debug'
 
@@ -21,14 +20,17 @@ sys.path.append(python_path)
 from log import print
 from arguments import ModelArguments, DataArguments, MyTrainingArguments
 from mydatasets import MyDataset, get_dataset_info
-from mytrainer_lora import MyInplaceZeroTrainer
+from lomo_trainer import LOMOTrainer
 from utils import DataCollatorForCauselLM, EvalDataCollatorForCauselLM
 
 
 def compute_metrics(all_pred, eval_dataset, eval_prefix=None):
     golds = [ins['answer'] for ins in eval_dataset.data]
-    preds = all_pred[:len(golds)]  # TODO: 验证pred和gold顺序一致
-    # assert len(preds) == len(golds), f"# of predictions {len(preds)} doesn't match # of references {len(golds)}."
+    preds = all_pred[:len(golds)]
+    print(len(all_pred))
+    print(all_pred[:8])
+    print(all_pred[-8:])
+    assert len(preds) == len(golds), f"# of predictions {len(preds)} doesn't match # of references {len(golds)}."
 
     acc = round(sum([int(pred == gold) for pred, gold in zip(preds, golds)]) / len(golds), 6)
     result = {'acc': acc}
@@ -37,7 +39,7 @@ def compute_metrics(all_pred, eval_dataset, eval_prefix=None):
 
 def train():
     # ========== 1. logs and args ==========
-    torch.set_default_dtype(torch.bfloat16)
+    torch.set_default_dtype(torch.float16)
     parser = HfArgumentParser((ModelArguments, DataArguments, MyTrainingArguments))
     if sys.argv[-1].endswith(".yaml"):
         model_args, data_args, training_args = parser.parse_yaml_file(yaml_file=os.path.abspath(sys.argv[-1]))
@@ -91,46 +93,6 @@ def train():
         config=config,
     )
 
-    peft_params = []
-    non_peft_names = []
-    non_peft_params = []
-    for name, param in model.named_parameters():
-        if param.requires_grad is False:
-            continue
-        non_peft_names.append(name)
-        non_peft_params.append(param)
-
-    # use peft
-    if training_args.peft_type is not None:
-        print(f'Using peft.{training_args.peft_type}')
-        if training_args.peft_type == 'lora':
-            peft_config = LoraConfig(
-                r=training_args.lora_r,
-                lora_alpha=training_args.lora_alpha,
-                target_modules=["q_proj", "v_proj"],
-                # target_modules=["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
-                lora_dropout=training_args.lora_dropout,
-                bias="none",
-                task_type=TaskType.CAUSAL_LM
-            )
-            model.enable_input_require_grads()
-        else:
-            raise ValueError(f"Unknown PEFT type: {training_args.peft_type}")
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
-
-        # unfreeze base model
-        # 包完peft之后的参数名字：base_model.model.model.layers.23.self_attn.v_proj.weight
-        # 之前的参数的名字：model.layers.23.self_attn.v_proj.weight
-        for name, param in model.named_parameters():
-            if name.split('base_model.model.')[1] in non_peft_names:
-                if not training_args.lora_only:
-                    param.requires_grad = True
-            if "lora_" in name:
-                peft_params.append(param)
-
-    torch.cuda.empty_cache()
-
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
         use_fast=False,
@@ -141,19 +103,10 @@ def train():
     # ========== 3. Preprocessing the datasets. ==========
     dataset_info = get_dataset_info(data_args.dataset_name)
     train_dataset = MyDataset(data_args, tokenizer, dataset_info, split=dataset_info.exemplar_split)
-    # if data_args.few_shot_size != -1:
-    #     # few_shot_indices = sample(range(len(train_dataset)), data_args.few_shot_size)
-    #     train_dataset = Subset(train_dataset, range(data_args.few_shot_size))
     eval_dataset = MyDataset(data_args, tokenizer, dataset_info, split=dataset_info.eval_split)
-    if dataset_info.test_split:
-        test_dataset = MyDataset(data_args, tokenizer, dataset_info, split=dataset_info.test_split)
-        eval_dataset = {
-            # 'validation': eval_dataset,
-            'test': test_dataset
-        }
 
     # ========== 4. Initialize our Trainer. ==========
-    trainer = MyInplaceZeroTrainer(
+    trainer = LOMOTrainer(
         model=model,
         training_args=training_args,
         data_collator={'train': DataCollatorForCauselLM(tokenizer, max_length=data_args.data_max_length, padding_side='left'),
@@ -162,9 +115,11 @@ def train():
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
-        optimizers={'model_parameters': peft_params},
     )
-    trainer.train()
+    if training_args.do_train:
+        trainer.train()
+    else:
+        trainer.eval(trainer.global_step, 0, trainer.eval_dataset, trainer.eval_dataloader, 'zero-shot')
 
 
 # run with $torchrun --nproc_per_node 2 train_inplace_tensor.py config/tensor_args.yaml
