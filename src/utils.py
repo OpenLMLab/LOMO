@@ -2,6 +2,7 @@ import copy
 from dataclasses import dataclass
 
 import numpy as np
+from torch.nn import CrossEntropyLoss
 from transformers.utils import PaddingStrategy
 from transformers.trainer import *
 import wandb
@@ -362,3 +363,21 @@ class DynamicLossScaler:
                     self.cur_hysteresis = self.delayed_shift
                 self.cur_scale *= self.scale_factor
         self.cur_iter += 1
+
+
+def get_loss(logits, labels, clip_loss_value=None):
+    # Shift so that tokens < n predict n
+    shift_logits = logits[..., :-1, :].contiguous()
+    shift_labels = labels[:, 1:].contiguous()
+    # Flatten the tokens
+    if clip_loss_value is not None:
+        loss_fct = CrossEntropyLoss(reduction='none')
+        loss = loss_fct(shift_logits.view(shift_labels.shape[0] * shift_labels.shape[1], -1),
+                        shift_labels.view(-1).cuda())
+        loss.data.clamp_(min=-clip_loss_value, max=clip_loss_value)
+        loss = loss.mean()
+    else:
+        loss_fct = CrossEntropyLoss()
+        loss = loss_fct(shift_logits.view(shift_labels.shape[0] * shift_labels.shape[1], -1),
+                        shift_labels.view(-1).cuda())
+    return loss
