@@ -89,62 +89,6 @@ class LOMOTrainer:
 
         get_accelerator().empty_cache()
 
-    def inplace_grad(self):
-        # An approximation of in-place grad update under zero3 of deepspeed
-        def func(x):
-            with torch.no_grad():
-                for n, p in self.model.named_parameters():
-                    if p.grad is not None:
-                        torch.distributed.all_reduce(p.grad, op=torch.distributed.ReduceOp.AVG, async_op=False)
-                        if self.loss_scaler.has_overflow_serial or self.loss_scaler._has_inf_or_nan(p.grad):
-                            p.grad = None
-                            self.loss_scaler.has_overflow_serial = True
-                            break
-                        # p.grad.div_(self.loss_scaler.loss_scale)
-                        if self.gather_norm:
-                            grad_fp32 = p.grad.detach().clone().to(torch.float32)
-                            grad_fp32.div_(self.loss_scaler.loss_scale)
-                            self.grad_norms.append(torch.norm(grad_fp32, 2.0))
-                            p.grad = None
-                        else:
-                            one_dim_grad = p.grad.view(-1)
-                            partition_size = p.ds_tensor.numel()
-                            start = partition_size * self.training_args.local_rank
-                            end = start + partition_size
-
-                            if end > p.grad.numel():
-                                partitioned_grad = one_dim_grad.narrow(0, start, p.grad.numel() - start)
-                                # partitioned_grad = torch.cat([partitioned_grad, torch.zeros(end - p.grad.numel()).cuda()])
-                                partitioned_p = p.ds_tensor.narrow(0, 0, p.grad.numel() - start)
-                                partitioned_grad_fp32 = partitioned_grad.detach().clone().to(torch.float32)
-                                partitioned_grad_fp32.div_(self.loss_scaler.loss_scale)
-                                partitioned_p_fp32 = partitioned_p.detach().clone().to(torch.float32)
-                                if self.training_args.clip_grad_value is not None:
-                                    # Gradients are modified in-place.
-                                    partitioned_grad_fp32.clamp_(min=-self.training_args.clip_grad_value,
-                                                            max=self.training_args.clip_grad_value)
-                                if self.training_args.clip_grad_norm is not None and self.training_args.clip_grad_norm > 0 and self.clip_coef is not None:
-                                    partitioned_grad_fp32.mul_(self.clip_coef)
-                                partitioned_p_fp32.add_(partitioned_grad_fp32, alpha=-self.lr)
-                                partitioned_p.copy_(partitioned_p_fp32)
-                            else:
-                                partitioned_grad = one_dim_grad.narrow(0, start, partition_size)
-                                partitioned_grad_fp32 = partitioned_grad.detach().clone().to(torch.float32)
-                                partitioned_grad_fp32.div_(self.loss_scaler.loss_scale)
-                                if self.training_args.clip_grad_value is not None:
-                                    # Gradients are modified in-place.
-                                    partitioned_grad_fp32.clamp_(min=-self.training_args.clip_grad_value,
-                                                            max=self.training_args.clip_grad_value)
-                                if self.training_args.clip_grad_norm is not None and self.training_args.clip_grad_norm > 0 and self.clip_coef is not None:
-                                    partitioned_grad_fp32.mul_(self.clip_coef)
-                                ds_tensor_fp32 = p.ds_tensor.detach().clone().to(torch.float32)
-                                ds_tensor_fp32.add_(partitioned_grad_fp32, alpha=-self.lr)
-                                p.ds_tensor.copy_(ds_tensor_fp32)
-                            p.grad = None
-            return x
-
-        return func
-
     def train(self):
         for epoch in range(self.training_args.num_train_epochs):
             print(f"***** Running Training *****")
