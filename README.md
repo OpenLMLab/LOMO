@@ -1,6 +1,6 @@
 # LOMO: LOw-Memory Optimization
 This is the implementation for [Full Parameter Fine-Tuning for Large Language Models with Limited Resorcces](https://arxiv.org/pdf/2306.09782.pdf).
-
+![LOMO](assets/LOMO.png)
 ---
 ## Run the code
 ```shell
