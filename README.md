@@ -11,6 +11,15 @@ LOMO is integrated with [CoLLiE](https://github.com/OpenLMLab/collie) library, w
 ![LOMO](assets/LOMO.png)
 
 ---
+## Dependencies
+```shell
+torch
+deepspeed
+transformers
+peft
+wandb
+```
+The minimum dependency is PyTorch, and others are used to reproduce our paper results. 
 ## Run the code
 ```shell
 bash run.sh

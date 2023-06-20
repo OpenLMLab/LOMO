@@ -52,7 +52,7 @@ class LOMO(Optimizer):
         else:
             self.loss_scaler = None
 
-        # register hook
+        # register hook function, which will be called through the backward process
         for n, p in self.model.named_parameters():
             if p.requires_grad:
                 p.register_hook(self.grad_func)
@@ -74,10 +74,12 @@ class LOMO(Optimizer):
                 for n, p in self.model.named_parameters():
                     if p.requires_grad and p.grad is not None:
                         if self.loss_scaler and self.loss_scaler.has_overflow_serial or self.loss_scaler._has_inf_or_nan(p.grad):
+                            # if the overflow is detected, drop the gradient
                             p.grad = None
                             self.loss_scaler.has_overflow_serial = True
                             break
                         if self.gather_norm:
+                            # we adopt two backward pass for gradient norm compuation and parameter update, respectively.
                             grad_fp32 = p.grad.detach().clone().to(torch.float32)
                             if self.loss_scaler:
                                 grad_fp32.div_(self.loss_scaler.loss_scale)
@@ -89,9 +91,10 @@ class LOMO(Optimizer):
                             if self.loss_scaler:
                                 grad_fp32.div_(self.loss_scaler.loss_scale)
                             if self.clip_grad_value is not None and self.clip_grad_value > 0:
-                                # Gradients are modified in-place.
+                                # Clipping gradients by their value
                                 grad_fp32.clamp_(min=-self.clip_grad_value, max=self.clip_grad_value)
                             if self.clip_grad_norm is not None and self.clip_grad_norm > 0 and self.clip_coef is not None:
+                                # Normalize the gradient according to its norm (computed in another pass)
                                 grad_fp32.mul_(self.clip_coef)
                             p_fp32 = p.data.detach().clone().to(torch.float32)
                             p_fp32.add_(grad_fp32, alpha=-self.lr)
@@ -113,11 +116,13 @@ class LOMO(Optimizer):
                     if p.grad is not None:
                         torch.distributed.all_reduce(p.grad, op=torch.distributed.ReduceOp.AVG, async_op=False)
                         if self.loss_scaler and self.loss_scaler.has_overflow_serial or self.loss_scaler._has_inf_or_nan(p.grad):
+                            # if the overflow is detected, drop the gradient
                             p.grad = None
                             self.loss_scaler.has_overflow_serial = True
                             break
 
                         if self.gather_norm:
+                            # we adopt two backward pass for gradient norm compuation and parameter update, respectively.
                             grad_fp32 = p.grad.detach().clone().to(torch.float32)
                             if self.loss_scaler:
                                 grad_fp32.div_(self.loss_scaler.loss_scale)
@@ -138,9 +143,10 @@ class LOMO(Optimizer):
                                     partitioned_grad_fp32.div_(self.loss_scaler.loss_scale)
                                 partitioned_p_fp32 = partitioned_p.detach().clone().to(torch.float32)
                                 if self.clip_grad_value is not None:
-                                    # Gradients are modified in-place.
+                                    # Clipping gradients by their value
                                     partitioned_grad_fp32.clamp_(min=-self.clip_grad_value, max=self.clip_grad_value)
                                 if self.clip_grad_norm is not None and self.clip_grad_norm > 0 and self.clip_coef is not None:
+                                    # Normalize the gradient according to its norm (computed in another pass)
                                     partitioned_grad_fp32.mul_(self.clip_coef)
                                 partitioned_p_fp32.add_(partitioned_grad_fp32, alpha=-self.lr)
                                 partitioned_p.copy_(partitioned_p_fp32)
@@ -151,9 +157,10 @@ class LOMO(Optimizer):
                                 if self.loss_scaler:
                                     partitioned_grad_fp32.div_(self.loss_scaler.loss_scale)
                                 if self.clip_grad_value is not None:
-                                    # Gradients are modified in-place.
+                                    # Clipping gradients by their value
                                     partitioned_grad_fp32.clamp_(min=-self.clip_grad_value, max=self.clip_grad_value)
                                 if self.clip_grad_norm is not None and self.clip_grad_norm > 0 and self.clip_coef is not None:
+                                    # Normalize the gradient according to its norm (computed in another pass)
                                     partitioned_grad_fp32.mul_(self.clip_coef)
                                 ds_tensor_fp32 = p.ds_tensor.detach().clone().to(torch.float32)
                                 ds_tensor_fp32.add_(partitioned_grad_fp32, alpha=-self.lr)
@@ -180,7 +187,8 @@ class LOMO(Optimizer):
         if self.loss_scaler:
             loss = loss * self.loss_scaler.loss_scale
         loss.backward()
-        # update the last one since the hook function will not be called for the last parameter
+        # update the last parameter since the last parameter in the computaiton graph is not ready when calling hook functions
+        # the argument of grad_func is just a placeholder, and it can be anything. 
         self.grad_func(0)
 
     def grad_norm(self, loss):
@@ -195,7 +203,8 @@ class LOMO(Optimizer):
             self.loss_scaler.has_overflow_serial = False
             loss = loss * self.loss_scaler.loss_scale
         loss.backward(retain_graph=True)
-        # update the last one since the hook function will not be called for the last parameter
+        # update the last parameter since the last parameter in the computaiton graph is not ready when calling hook functions
+        # the argument of grad_func is just a placeholder, and it can be anything. 
         self.grad_func(0)
 
         if self.loss_scaler and self.loss_scaler.has_overflow_serial:
