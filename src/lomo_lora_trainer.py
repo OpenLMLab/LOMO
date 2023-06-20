@@ -41,6 +41,8 @@ class LOMOLoRATrainer:
             optimizers=None,
     ):
         self.training_args = training_args
+        if self.training_args.world_size > 1:
+            raise NotImplementedError("Distributed training for LOMO+LoRA is not supported yet.")
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.tokenizer = tokenizer
