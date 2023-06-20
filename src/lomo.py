@@ -78,25 +78,21 @@ class LOMO(Optimizer):
                             p.grad = None
                             self.loss_scaler.has_overflow_serial = True
                             break
+                        grad_fp32 = p.grad.to(torch.float32)
+                        p.grad = None
+                        if self.loss_scaler:
+                            grad_fp32.div_(self.loss_scaler.loss_scale)
                         if self.gather_norm:
                             # we adopt two backward pass for gradient norm compuation and parameter update, respectively.
-                            grad_fp32 = p.grad.detach().clone().to(torch.float32)
-                            if self.loss_scaler:
-                                grad_fp32.div_(self.loss_scaler.loss_scale)
                             self.grad_norms.append(torch.norm(grad_fp32, 2.0))
-                            p.grad = None
                         else:
-                            grad_fp32 = p.grad.detach().clone().to(torch.float32)
-                            p.grad = None
-                            if self.loss_scaler:
-                                grad_fp32.div_(self.loss_scaler.loss_scale)
                             if self.clip_grad_value is not None and self.clip_grad_value > 0:
                                 # Clipping gradients by their value
                                 grad_fp32.clamp_(min=-self.clip_grad_value, max=self.clip_grad_value)
                             if self.clip_grad_norm is not None and self.clip_grad_norm > 0 and self.clip_coef is not None:
                                 # Normalize the gradient according to its norm (computed in another pass)
                                 grad_fp32.mul_(self.clip_coef)
-                            p_fp32 = p.data.detach().clone().to(torch.float32)
+                            p_fp32 = p.data.to(torch.float32)
                             p_fp32.add_(grad_fp32, alpha=-self.lr)
                             p.data.copy_(p_fp32)
 
@@ -121,51 +117,32 @@ class LOMO(Optimizer):
                             self.loss_scaler.has_overflow_serial = True
                             break
 
+                        grad_fp32 = p.grad.to(torch.float32)
+                        p.grad = None
+                        param_fp32 = p.ds_tensor.to(torch.float32)
+                        if self.loss_scaler:
+                            grad_fp32.div_(self.loss_scaler.loss_scale)
+
                         if self.gather_norm:
                             # we adopt two backward pass for gradient norm compuation and parameter update, respectively.
-                            grad_fp32 = p.grad.detach().clone().to(torch.float32)
-                            if self.loss_scaler:
-                                grad_fp32.div_(self.loss_scaler.loss_scale)
                             self.grad_norms.append(torch.norm(grad_fp32, 2.0))
-                            p.grad = None
-                        else:
-                            one_dim_grad = p.grad.view(-1)
+                        else:  # update param
+                            one_dim_grad_fp32 = grad_fp32.view(-1)
                             partition_size = p.ds_tensor.numel()
                             start = partition_size * self.local_rank
-                            end = start + partition_size
-                            if end > p.grad.numel():
-                                partitioned_grad = one_dim_grad.narrow(0, start, p.grad.numel() - start)
-                                # partitioned_grad = torch.cat([partitioned_grad, torch.zeros(end - p.grad.numel()).cuda()])
-                                partitioned_p = p.ds_tensor.narrow(0, 0, p.grad.numel() - start)
-                                partitioned_grad_fp32 = partitioned_grad.detach().clone().to(torch.float32)
-                                p.grad = None
-                                if self.loss_scaler:
-                                    partitioned_grad_fp32.div_(self.loss_scaler.loss_scale)
-                                partitioned_p_fp32 = partitioned_p.detach().clone().to(torch.float32)
-                                if self.clip_grad_value is not None:
-                                    # Clipping gradients by their value
-                                    partitioned_grad_fp32.clamp_(min=-self.clip_grad_value, max=self.clip_grad_value)
-                                if self.clip_grad_norm is not None and self.clip_grad_norm > 0 and self.clip_coef is not None:
-                                    # Normalize the gradient according to its norm (computed in another pass)
-                                    partitioned_grad_fp32.mul_(self.clip_coef)
-                                partitioned_p_fp32.add_(partitioned_grad_fp32, alpha=-self.lr)
-                                partitioned_p.copy_(partitioned_p_fp32)
-                            else:
-                                partitioned_grad = one_dim_grad.narrow(0, start, partition_size)
-                                partitioned_grad_fp32 = partitioned_grad.detach().clone().to(torch.float32)
-                                p.grad = None
-                                if self.loss_scaler:
-                                    partitioned_grad_fp32.div_(self.loss_scaler.loss_scale)
-                                if self.clip_grad_value is not None:
-                                    # Clipping gradients by their value
-                                    partitioned_grad_fp32.clamp_(min=-self.clip_grad_value, max=self.clip_grad_value)
-                                if self.clip_grad_norm is not None and self.clip_grad_norm > 0 and self.clip_coef is not None:
-                                    # Normalize the gradient according to its norm (computed in another pass)
-                                    partitioned_grad_fp32.mul_(self.clip_coef)
-                                ds_tensor_fp32 = p.ds_tensor.detach().clone().to(torch.float32)
-                                ds_tensor_fp32.add_(partitioned_grad_fp32, alpha=-self.lr)
-                                p.ds_tensor.copy_(ds_tensor_fp32)
-                            p.grad = None
+                            end = min(start + partition_size, grad_fp32.numel())
+                            partitioned_grad_fp32 = one_dim_grad_fp32.narrow(0, start, end - start)
+
+                            if self.clip_grad_value is not None:
+                                # Clipping gradients by their value
+                                partitioned_grad_fp32.clamp_(min=-self.clip_grad_value, max=self.clip_grad_value)
+                            if self.clip_grad_norm is not None and self.clip_grad_norm > 0 and self.clip_coef is not None:
+                                # Normalize the gradient according to its norm (computed in another pass)
+                                partitioned_grad_fp32.mul_(self.clip_coef)
+
+                            partitioned_p = param_fp32.narrow(0, 0, end - start)
+                            partitioned_p.add_(partitioned_grad_fp32, alpha=-self.lr)
+                            p.ds_tensor[ : end - start] = partitioned_p
             return x
 
         return func

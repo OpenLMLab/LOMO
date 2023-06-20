@@ -27,8 +27,7 @@ from utils import DataCollatorForCauselLM, EvalDataCollatorForCauselLM
 
 def compute_metrics(all_pred, eval_dataset, eval_prefix=None):
     golds = [ins['answer'] for ins in eval_dataset.data]
-    preds = all_pred[:len(golds)]  # TODO: 验证pred和gold顺序一致
-    # assert len(preds) == len(golds), f"# of predictions {len(preds)} doesn't match # of references {len(golds)}."
+    preds = all_pred[:len(golds)]
 
     acc = round(sum([int(pred == gold) for pred, gold in zip(preds, golds)]) / len(golds), 6)
     result = {'acc': acc}
