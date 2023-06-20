@@ -14,7 +14,7 @@ hf_learning_rate: 0.0005
 hf_weight_decay: 0
 hf_lr_scheduler_type: 'linear'
 hf_warmup: 0.05
-tag: 'lora-qv-r2-inplace-sgd'
+tag: 'lora-qv-r2-lomo'
 output_dir: 'outputs'
 overwrite_output_dir: true
 deepspeed: 'config/ds_config_lora.json'

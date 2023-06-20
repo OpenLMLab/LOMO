@@ -152,7 +152,7 @@ def train():
         }
 
     # ========== 4. Initialize our Trainer. ==========
-    trainer = MyInplaceZeroTrainer(
+    trainer = LOMOLoRATrainer(
         model=model,
         training_args=training_args,
         data_collator={'train': DataCollatorForCauselLM(tokenizer, max_length=data_args.data_max_length, padding_side='left'),
@@ -166,6 +166,5 @@ def train():
     trainer.train()
 
 
-# run with $torchrun --nproc_per_node 2 train_inplace_tensor.py config/tensor_args.yaml
 if __name__ == "__main__":
     train()

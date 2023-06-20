@@ -118,6 +118,5 @@ def train():
         trainer.eval(trainer.global_step, 0, trainer.eval_dataset, trainer.eval_dataloader, 'zero-shot')
 
 
-# run with $torchrun --nproc_per_node 2 train_inplace_tensor.py config/tensor_args.yaml
 if __name__ == "__main__":
     train()
