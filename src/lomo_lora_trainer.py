@@ -329,7 +329,10 @@ class LOMOLoRATrainer:
             self.model.eval()
             for batch in tqb:
                 with torch.no_grad():
-                    pred = self.eval_step(batch)  # change to generate_step() for generation tasks
+                    if self.training_args.predict_with_generate:
+                        pred = self.generate_step(batch)
+                    else:
+                        pred = self.eval_step(batch)
                     all_preds = pred if all_preds is None else all_preds + pred
 
             all_preds_gather = [None for _ in range(self.training_args.world_size)]

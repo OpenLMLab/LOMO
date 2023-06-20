@@ -34,4 +34,4 @@ group_by_length: false
 #report_to: 'wandb'
 dataloader_pin_memory: false
 gradient_checkpointing: true
-predict_with_generate: true
+predict_with_generate: false

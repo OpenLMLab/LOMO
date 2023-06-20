@@ -28,6 +28,8 @@ class DataArguments:
 class MyTrainingArguments(Seq2SeqTrainingArguments):
     tag: str = field(default=None, metadata={"help": "Tag for the experiment."})
 
+    predict_with_generate: bool = field(default=False, metadata={"help": "Whether to use generate for prediction."})
+
     clip_grad_norm: float = field(default=None, metadata={
         "help": "Maximum gradient normalized value (for gradient clipping)."})  # recommend 1.0
     clip_grad_value: float = field(default=None, metadata={"help": "Maximum gradient value (for gradient clipping)."})
