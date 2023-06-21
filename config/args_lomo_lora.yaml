@@ -1,5 +1,5 @@
 # model
-model_name_or_path: '/home/ubuntu/projects/tunelite/cache/llama-7b'
+model_name_or_path: '/remote-home/share/llama_hf/7B'
 # data
 dataset_name: 'wic'
 refresh: false
@@ -21,8 +21,8 @@ deepspeed: 'config/ds_config_lora.json'
 do_train: true
 do_eval: true
 evaluation_strategy: 'epoch'
-per_device_train_batch_size: 2
-per_device_eval_batch_size: 2
+per_device_train_batch_size: 16
+per_device_eval_batch_size: 16
 learning_rate: 0.005
 weight_decay: 0
 num_train_epochs: 10
