@@ -159,9 +159,13 @@ class LOMO(Optimizer):
         if self.clip_grad_norm is not None and self.clip_grad_norm > 0 and self.clip_coef is None:
             raise ValueError(
                 "clip_grad_norm is not None, but clip_coef is None. "
-                "Please call optimizer.grad_norm() before backward_step."
+                "Please call optimizer.grad_norm() before optimizer.fused_backward()."
             )
         if self.loss_scaler:
+            if self.clip_grad_norm is None:
+                raise ValueError(
+                    "Loss scaling is recommended to be used with grad norm to get better performance."
+                )
             loss = loss * self.loss_scaler.loss_scale
         loss.backward()
         # update the last parameter since the last parameter in the computaiton graph is not ready when calling hook functions
