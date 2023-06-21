@@ -49,6 +49,10 @@ class LOMO(Optimizer):
             self.loss_scaler = DynamicLossScaler(
                 init_scale=2 ** 16,
             )  # TODO: add args
+            if self.clip_grad_norm is None:
+                raise ValueError(
+                    "Loss scaling is recommended to be used with grad norm to get better performance."
+                )
         else:
             self.loss_scaler = None
 
@@ -162,10 +166,6 @@ class LOMO(Optimizer):
                 "Please call optimizer.grad_norm() before optimizer.fused_backward()."
             )
         if self.loss_scaler:
-            if self.clip_grad_norm is None:
-                raise ValueError(
-                    "Loss scaling is recommended to be used with grad norm to get better performance."
-                )
             loss = loss * self.loss_scaler.loss_scale
         loss.backward()
         # update the last parameter since the last parameter in the computaiton graph is not ready when calling hook functions
