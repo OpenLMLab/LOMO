@@ -4,6 +4,7 @@ import operator
 from collections import OrderedDict
 from itertools import chain
 from pathlib import Path
+import shutil
 
 import tqdm
 import numpy as np
@@ -83,12 +84,15 @@ class LOMOLoRATrainer:
         self.grad_norms = []
         self.clip_coef = None
 
-        hf_optimizer = AdamW(optimizers['model_parameters'], lr=training_args.hf_learning_rate,
-                             weight_decay=training_args.hf_weight_decay)
-        hf_lr_scheduler = get_scheduler(training_args.hf_lr_scheduler_type,
-                                        optimizer=hf_optimizer,
-                                        num_warmup_steps=training_args.hf_warmup * self.n_steps if training_args.hf_warmup < 1 else training_args.hf_warmup,
-                                        num_training_steps=self.n_steps)
+        hf_optimizer = None
+        hf_lr_scheduler = None
+        if self.training_args.do_train:
+            hf_optimizer = AdamW(optimizers['model_parameters'], lr=training_args.hf_learning_rate,
+                                 weight_decay=training_args.hf_weight_decay)
+            hf_lr_scheduler = get_scheduler(training_args.hf_lr_scheduler_type,
+                                            optimizer=hf_optimizer,
+                                            num_warmup_steps=training_args.hf_warmup * self.n_steps if training_args.hf_warmup < 1 else training_args.hf_warmup,
+                                            num_training_steps=self.n_steps)
 
         if 'deepspeed' not in sys.modules:
             raise ModuleNotFoundError(
@@ -98,7 +102,7 @@ class LOMOLoRATrainer:
         self.model, self.peft_optimizer, _, self.peft_lr_scheduler = deepspeed.initialize(
             config=training_args.deepspeed,
             model=model,
-            model_parameters=optimizers['model_parameters'],
+            model_parameters=optimizers['model_parameters'] if self.training_args.do_train else None,
             optimizer=hf_optimizer,
             lr_scheduler=hf_lr_scheduler
         )
@@ -466,9 +470,11 @@ class LOMOLoRATrainer:
         )
 
     def save_model(self, index):
-        checkpoint_dir = sorted(Path(self.training_args.output_dir).glob("checkpoint-*"))
-        if len(checkpoint_dir) >= self.training_args.save_total_limit:
-            os.rmdir(checkpoint_dir[0])
+        if self.training_args.local_rank in [-1, 0]:
+            checkpoint_dir = sorted(Path(self.training_args.output_dir).glob("checkpoint-*"))
+            if len(checkpoint_dir) >= self.training_args.save_total_limit:
+                shutil.rmtree(checkpoint_dir[0], ignore_errors=True)
+        torch.distributed.barrier()
 
         output_dir = os.path.join(self.training_args.output_dir, f"checkpoint-{index}")
         if not os.path.exists(output_dir):
@@ -516,11 +522,12 @@ class LOMOLoRATrainer:
                 print(f"Save model to {output_dir}.")
 
             # save lora
-            self.model.module.peft_config['default'].save_pretrained(output_dir)
+            adapter_output_dir = os.path.join(output_dir, 'adapter_model')
+            self.model.module.peft_config['default'].save_pretrained(adapter_output_dir)
             # if state dict is not what you expected, you can use the following code to get the state dict
             # engine_state_dict = self.model._zero3_consolidated_16bit_state_dict()
             lora_state_dict = get_peft_model_state_dict(self.model.module, state_dict)
-            torch.save(lora_state_dict, os.path.join(output_dir, "adapter_model.bin"))
-            print(f"Save adapter model at {output_dir}")
+            torch.save(lora_state_dict, os.path.join(adapter_output_dir, "adapter_model.bin"))
+            print(f"Save adapter model at {adapter_output_dir}")
 
         torch.distributed.barrier()

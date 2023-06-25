@@ -33,6 +33,9 @@ clip_grad_norm: 1.0
 #clip_loss_value: 5.0
 log_level: 'info'
 logging_steps: 1
+# please set `resume_from_checkpoint` to load checkpoints. check `merge_llama_with_lora.py` first.
+#resume_from_checkpoint: 'outputs/wic_7B_lora-qv-r2-lomo/output_lr0.005_bs16_warmup0.05_clipnorm1.0/checkpoint-0/merge_weights'
+# please set `save_strategy` (`no`, `epoch`, `steps`) and `save_total_limit` (the max amount of checkpoints) to save checkpoints.
 save_strategy: 'no'
 save_total_limit: 0
 seed: 42

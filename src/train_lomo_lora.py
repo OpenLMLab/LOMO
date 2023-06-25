@@ -84,51 +84,14 @@ def train():
     dschf = HfDeepSpeedConfig(ds_config)
     config = AutoConfig.from_pretrained(model_args.model_name_or_path)
     config.gradient_checkpointing = training_args.gradient_checkpointing
+    if training_args.resume_from_checkpoint is not None:
+        print(f'Load checkpoint from {training_args.resume_from_checkpoint}.')
+        assert not training_args.do_train, 'do not support resume training now.'
     model = AutoModelForCausalLM.from_pretrained(
-        model_args.model_name_or_path,
+        model_args.model_name_or_path if training_args.resume_from_checkpoint is None else training_args.resume_from_checkpoint,
         local_files_only=True,
         config=config,
     )
-
-    peft_params = []
-    non_peft_names = []
-    non_peft_params = []
-    for name, param in model.named_parameters():
-        if param.requires_grad is False:
-            continue
-        non_peft_names.append(name)
-        non_peft_params.append(param)
-
-    # use peft
-    if training_args.peft_type is not None:
-        print(f'Using peft.{training_args.peft_type}')
-        if training_args.peft_type == 'lora':
-            peft_config = LoraConfig(
-                r=training_args.lora_r,
-                lora_alpha=training_args.lora_alpha,
-                target_modules=["q_proj", "v_proj"],
-                # target_modules=["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
-                lora_dropout=training_args.lora_dropout,
-                bias="none",
-                task_type=TaskType.CAUSAL_LM
-            )
-            model.enable_input_require_grads()
-        else:
-            raise ValueError(f"Unknown PEFT type: {training_args.peft_type}")
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
-
-        # unfreeze base model
-        # 包完peft之后的参数名字：base_model.model.model.layers.23.self_attn.v_proj.weight
-        # 之前的参数的名字：model.layers.23.self_attn.v_proj.weight
-        for name, param in model.named_parameters():
-            if name.split('base_model.model.')[1] in non_peft_names:
-                if not training_args.lora_only:
-                    param.requires_grad = True
-            if "lora_" in name:
-                peft_params.append(param)
-
-    torch.cuda.empty_cache()
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
@@ -136,6 +99,47 @@ def train():
         padding_side='left'
     )
     tokenizer.pad_token_id = 0
+
+    peft_params = []
+    non_peft_names = []
+    non_peft_params = []
+    if training_args.resume_from_checkpoint is None:
+        for name, param in model.named_parameters():
+            if param.requires_grad is False:
+                continue
+            non_peft_names.append(name)
+            non_peft_params.append(param)
+
+        # use peft
+        if training_args.peft_type is not None:
+            print(f'Using peft.{training_args.peft_type}')
+            if training_args.peft_type == 'lora':
+                peft_config = LoraConfig(
+                    r=training_args.lora_r,
+                    lora_alpha=training_args.lora_alpha,
+                    target_modules=["q_proj", "v_proj"],
+                    # target_modules=["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+                    lora_dropout=training_args.lora_dropout,
+                    bias="none",
+                    task_type=TaskType.CAUSAL_LM
+                )
+                model.enable_input_require_grads()
+            else:
+                raise ValueError(f"Unknown PEFT type: {training_args.peft_type}")
+            model = get_peft_model(model, peft_config)
+            model.print_trainable_parameters()
+
+            # unfreeze base model
+            # 包完peft之后的参数名字：base_model.model.model.layers.23.self_attn.v_proj.weight
+            # 之前的参数的名字：model.layers.23.self_attn.v_proj.weight
+            for name, param in model.named_parameters():
+                if name.split('base_model.model.')[1] in non_peft_names:
+                    if not training_args.lora_only:
+                        param.requires_grad = True
+                if "lora_" in name:
+                    peft_params.append(param)
+
+    torch.cuda.empty_cache()
 
     # ========== 3. Preprocessing the datasets. ==========
     dataset_info = get_dataset_info(data_args.dataset_name)
@@ -163,7 +167,11 @@ def train():
         compute_metrics=compute_metrics,
         optimizers={'model_parameters': peft_params},
     )
-    trainer.train()
+    if training_args.do_train:
+        trainer.train()
+
+    if training_args.do_eval:
+        trainer.eval(trainer.global_step, 0, trainer.eval_dataset, trainer.eval_dataloader, 'test')
 
 
 if __name__ == "__main__":

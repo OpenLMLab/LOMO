@@ -116,8 +116,9 @@ def train():
     )
     if training_args.do_train:
         trainer.train()
-    else:
-        trainer.eval(trainer.global_step, 0, trainer.eval_dataset, trainer.eval_dataloader, 'zero-shot')
+
+    if training_args.do_eval:
+        trainer.eval(trainer.global_step, 0, trainer.eval_dataset, trainer.eval_dataloader, 'test')
 
 
 if __name__ == "__main__":
