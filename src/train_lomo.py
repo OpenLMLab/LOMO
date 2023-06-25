@@ -83,8 +83,10 @@ def train():
     dschf = HfDeepSpeedConfig(ds_config)
     config = AutoConfig.from_pretrained(model_args.model_name_or_path)
     config.gradient_checkpointing = training_args.gradient_checkpointing
+    if training_args.resume_from_checkpoint is not None:
+        print(f'Load checkpoint from {training_args.resume_from_checkpoint}.')
     model = AutoModelForCausalLM.from_pretrained(
-        model_args.model_name_or_path,
+        model_args.model_name_or_path if training_args.resume_from_checkpoint is None else training_args.resume_from_checkpoint,
         local_files_only=True,
         config=config,
     )

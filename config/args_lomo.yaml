@@ -23,6 +23,9 @@ num_train_epochs: 10
 lr_scheduler_type: 'linear'
 warmup: 0.1
 clip_grad_norm: 1.0
+# please set `resume_from_checkpoint` to load checkpoints.
+#resume_from_checkpoint: 'outputs/wic_7B_lomo/output_adamw_hf_lr0.03_bs16_warmup0.1_clipnorm1.0/checkpoint-0'
+# please set `save_strategy` (`no`, `epoch`, `steps`) and `save_total_limit` (the max amount of checkpoints) to save checkpoints.
 save_strategy: 'no'
 save_total_limit: 0
 seed: 42
