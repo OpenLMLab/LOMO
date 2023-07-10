@@ -77,11 +77,12 @@ class LOMO(Optimizer):
             with torch.no_grad():
                 for n, p in self.model.named_parameters():
                     if p.requires_grad and p.grad is not None:
-                        if self.loss_scaler and self.loss_scaler.has_overflow_serial or self.loss_scaler._has_inf_or_nan(p.grad):
-                            # if the overflow is detected, drop the gradient
-                            p.grad = None
-                            self.loss_scaler.has_overflow_serial = True
-                            break
+                        if self.loss_scaler:
+                            if self.loss_scaler.has_overflow_serial or self.loss_scaler._has_inf_or_nan(p.grad):
+                                # if the overflow is detected, drop the gradient
+                                p.grad = None
+                                self.loss_scaler.has_overflow_serial = True
+                                break
                         grad_fp32 = p.grad.to(torch.float32)
                         p.grad = None
                         if self.loss_scaler:
@@ -115,11 +116,12 @@ class LOMO(Optimizer):
                 for n, p in self.model.named_parameters():
                     if p.grad is not None:
                         torch.distributed.all_reduce(p.grad, op=torch.distributed.ReduceOp.AVG, async_op=False)
-                        if self.loss_scaler and self.loss_scaler.has_overflow_serial or self.loss_scaler._has_inf_or_nan(p.grad):
-                            # if the overflow is detected, drop the gradient
-                            p.grad = None
-                            self.loss_scaler.has_overflow_serial = True
-                            break
+                        if self.loss_scaler:
+                            if self.loss_scaler.has_overflow_serial or self.loss_scaler._has_inf_or_nan(p.grad):
+                                # if the overflow is detected, drop the gradient
+                                p.grad = None
+                                self.loss_scaler.has_overflow_serial = True
+                                break
 
                         grad_fp32 = p.grad.to(torch.float32)
                         p.grad = None
