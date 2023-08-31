@@ -404,46 +404,31 @@ class LOMOTrainer:
         output_dir = os.path.join(self.training_args.output_dir, f"checkpoint-{index}")
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
-        state_dict = OrderedDict()
-        for n, p in self.model.module.named_parameters():
-            state_dict[n] = (p.ds_tensor.detach().cpu(), p.ds_numel, p.ds_shape)
-        # save model shards
-        if self.training_args.local_rank not in [-1, 0]:
-            with open(os.path.join(output_dir, f'pytorch_model-{self.training_args.local_rank}.bin'), 'wb') as f:
-                torch.save(state_dict, f)
-        torch.distributed.barrier()
-        # merge model shards
-        if self.training_args.local_rank in [-1, 0]:
-            # save config
+        state_dict = OrderedDict() if torch.distributed.get_rank() == 0 else None
+        shared_params = {}
+
+        # Prepare for checkpoint save by ensuring all parameters are partitioned
+        self.model.optimizer.partition_all_parameters()
+
+        for name, param in self.model.module.named_parameters():
+            with deepspeed.zero.GatheredParameters(param):
+                if torch.distributed.get_rank() == 0:
+                    # can't rely on param.data_ptr() as it will be reused as weights gets
+                    # gathered and reduced, but param.ds_id is unique across all zero weights
+                    # (and shared params will have the same param.ds_id)
+                    if param.ds_id in shared_params:
+                        # shared weights
+                        state_dict[name] = state_dict[shared_params[param.ds_id]]
+                    else:
+                        state_dict[name] = param.detach().cpu()
+                        shared_params[param.ds_id] = name
+
+        if len(self.model.optimizer.persistent_parameters) > 0:
+            self.model.optimizer.persistent_parameters[0].all_gather(self.model.optimizer.persistent_parameters)
+
+        if torch.distributed.get_rank() == 0:
             self.model.module.config.save_pretrained(output_dir)
-            for rank in range(1, self.training_args.world_size):
-                with open(os.path.join(output_dir, f'pytorch_model-{rank}.bin'), 'rb') as f:
-                    state_dict_rank = torch.load(f)
-                    for n in state_dict_rank:
-                        state_dict[n] = (
-                            torch.cat([state_dict[n][0], state_dict_rank[n][0]], dim=0),
-                            state_dict[n][1],
-                            state_dict[n][2]
-                        )
-                # remove shard files
-                os.remove(os.path.join(output_dir, f'pytorch_model-{rank}.bin'))
-            # reshape to original shape
-            for n in state_dict:
-                numel = state_dict[n][1]
-                shape = state_dict[n][2]
-                state_dict[n] = state_dict[n][0][:numel].view(shape)
+            torch.save(state_dict, os.path.join(output_dir, 'pytorch_model.bin'))
+            print(f"Save model to {output_dir}")
 
-            # save inv_freq for llama
-            if self.model.module.config.model_type == "llama":
-                num_layers = self.model.module.config.num_hidden_layers
-                head_dim = self.model.module.config.hidden_size // self.model.module.config.num_attention_heads
-                base = 10000.0
-                inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2).float() / head_dim))
-                for layer in range(num_layers):
-                    state_dict[f'model.layers.{layer}.self_attn.rotary_emb.inv_freq'] = inv_freq
-
-
-            with open(os.path.join(output_dir, f'pytorch_model.bin'), 'wb') as f:
-                torch.save(state_dict, f)
-                print(f"Save model to {output_dir}.")
         torch.distributed.barrier()
