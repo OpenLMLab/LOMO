@@ -2,15 +2,13 @@ import copy
 import os
 import sys
 
-from random import sample
-
 import torch
-from torch.utils.data import Subset
 from transformers import HfArgumentParser
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 from transformers import set_seed
 from dataclasses import asdict
 from transformers.deepspeed import HfDeepSpeedConfig
+from peft import get_peft_model, TaskType, LoraConfig
 import wandb
 # os.environ['WANDB_MODE'] = 'debug'
 
@@ -20,7 +18,7 @@ sys.path.append(python_path)
 from log import print
 from arguments import ModelArguments, DataArguments, MyTrainingArguments
 from mydatasets import MyDataset, get_dataset_info
-from lomo_trainer import LOMOTrainer
+from lomo_lora_trainer import LOMOLoRATrainer
 from utils import DataCollatorForCauselLM, EvalDataCollatorForCauselLM
 
 
@@ -35,7 +33,7 @@ def compute_metrics(all_pred, eval_dataset, eval_prefix=None):
 
 def train():
     # ========== 1. logs and args ==========
-    torch.set_default_dtype(torch.float16)
+    torch.set_default_dtype(torch.bfloat16)
     parser = HfArgumentParser((ModelArguments, DataArguments, MyTrainingArguments))
     if sys.argv[-1].endswith(".yaml"):
         model_args, data_args, training_args = parser.parse_yaml_file(yaml_file=os.path.abspath(sys.argv[-1]))
@@ -85,6 +83,7 @@ def train():
     config.gradient_checkpointing = training_args.gradient_checkpointing
     if training_args.resume_from_checkpoint is not None:
         print(f'Load checkpoint from {training_args.resume_from_checkpoint}.')
+        assert not training_args.do_train, 'do not support resume training now.'
     model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path if training_args.resume_from_checkpoint is None else training_args.resume_from_checkpoint,
         local_files_only=True,
@@ -98,13 +97,63 @@ def train():
     )
     tokenizer.pad_token_id = 0
 
+    peft_params = []
+    non_peft_names = []
+    non_peft_params = []
+    if training_args.resume_from_checkpoint is None:
+        for name, param in model.named_parameters():
+            if param.requires_grad is False:
+                continue
+            non_peft_names.append(name)
+            non_peft_params.append(param)
+
+        # use peft
+        if training_args.peft_type is not None:
+            print(f'Using peft.{training_args.peft_type}')
+            if training_args.peft_type == 'lora':
+                peft_config = LoraConfig(
+                    r=training_args.lora_r,
+                    lora_alpha=training_args.lora_alpha,
+                    target_modules=["q_proj", "v_proj"],
+                    # target_modules=["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
+                    lora_dropout=training_args.lora_dropout,
+                    bias="none",
+                    task_type=TaskType.CAUSAL_LM
+                )
+                model.enable_input_require_grads()
+            else:
+                raise ValueError(f"Unknown PEFT type: {training_args.peft_type}")
+            model = get_peft_model(model, peft_config)
+            model.print_trainable_parameters()
+
+            # unfreeze base model
+            # 包完peft之后的参数名字：base_model.model.model.layers.23.self_attn.v_proj.weight
+            # 之前的参数的名字：model.layers.23.self_attn.v_proj.weight
+            for name, param in model.named_parameters():
+                if name.split('base_model.model.')[1] in non_peft_names:
+                    if not training_args.lora_only:
+                        param.requires_grad = True
+                if "lora_" in name:
+                    peft_params.append(param)
+
+    torch.cuda.empty_cache()
+
     # ========== 3. Preprocessing the datasets. ==========
     dataset_info = get_dataset_info(data_args.dataset_name)
     train_dataset = MyDataset(data_args, tokenizer, dataset_info, split=dataset_info.exemplar_split)
+    # if data_args.few_shot_size != -1:
+    #     # few_shot_indices = sample(range(len(train_dataset)), data_args.few_shot_size)
+    #     train_dataset = Subset(train_dataset, range(data_args.few_shot_size))
     eval_dataset = MyDataset(data_args, tokenizer, dataset_info, split=dataset_info.eval_split)
+    if dataset_info.test_split:
+        test_dataset = MyDataset(data_args, tokenizer, dataset_info, split=dataset_info.test_split)
+        eval_dataset = {
+            # 'validation': eval_dataset,
+            'test': test_dataset
+        }
 
     # ========== 4. Initialize our Trainer. ==========
-    trainer = LOMOTrainer(
+    trainer = LOMOLoRATrainer(
         model=model,
         training_args=training_args,
         data_collator={'train': DataCollatorForCauselLM(tokenizer, max_length=data_args.data_max_length, padding_side='left'),
@@ -113,6 +162,7 @@ def train():
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
+        optimizers={'model_parameters': peft_params},
     )
     if training_args.do_train:
         trainer.train()

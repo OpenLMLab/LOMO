@@ -7,15 +7,12 @@ from pathlib import Path
 import shutil
 
 import tqdm
-import numpy as np
 import torch
-from deepspeed.runtime.zero.parameter_offload import DeepSpeedZeRoOffload
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DistributedSampler, DataLoader
 from transformers.trainer_pt_utils import DistributedLengthGroupedSampler, SequentialDistributedSampler, nested_numpify
 from transformers.trainer_utils import has_length, seed_worker
 from transformers import GenerationConfig
-from transformers.optimization import AdamW, get_scheduler
 
 try:
     import deepspeed
@@ -24,12 +21,12 @@ try:
 except:
     pass
 
-from src.utils import LearningRateScheduler, WandbLogger, get_loss
+from src.utils import LearningRateScheduler, WandbLogger, DynamicLossScaler, get_loss
+from src.lomo import LOMO
 from log import print
-from peft import get_peft_model_state_dict
 
 
-class LOMOLoRATrainer:
+class LOMOTrainer:
     def __init__(
             self,
             model,
@@ -39,19 +36,26 @@ class LOMOLoRATrainer:
             eval_dataset,
             tokenizer,
             compute_metrics,
-            optimizers=None,
     ):
         self.training_args = training_args
-        if self.training_args.world_size > 1:
-            raise NotImplementedError("Distributed training for LOMO+LoRA is not supported yet.")
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.tokenizer = tokenizer
         self.wandb = WandbLogger(training_args)
-        self.allow_print = self.training_args.local_rank in [0, -1]
+        self.allow_print = self.training_args.local_rank in [-1, 0]
         if self.training_args.do_eval:
             self.metrics = {}
             self.compute_metrics = compute_metrics
+
+        if 'deepspeed' not in sys.modules:
+            raise ModuleNotFoundError(
+                "Detected DeepSpeed is not installed. See https://github.com/microsoft/DeepSpeed")
+
+        # Initialize deepspeed engine
+        self.model, _, _, _ = deepspeed.initialize(
+            config=training_args.deepspeed,
+            model=model,
+        )
 
         # get train_dataloader and eval_dataloader
         if isinstance(data_collator, dict):
@@ -79,107 +83,10 @@ class LOMOLoRATrainer:
                                                   schedule=self.training_args.lr_scheduler_type,
                                                   n_steps=self.n_steps)
         self.lr = 0
-        # for grad norm
-        self.gather_norm = False
-        self.grad_norms = []
-        self.clip_coef = None
 
-        hf_optimizer = None
-        hf_lr_scheduler = None
-        if self.training_args.do_train:
-            hf_optimizer = AdamW(optimizers['model_parameters'], lr=training_args.hf_learning_rate,
-                                 weight_decay=training_args.hf_weight_decay)
-            hf_lr_scheduler = get_scheduler(training_args.hf_lr_scheduler_type,
-                                            optimizer=hf_optimizer,
-                                            num_warmup_steps=training_args.hf_warmup * self.n_steps if training_args.hf_warmup < 1 else training_args.hf_warmup,
-                                            num_training_steps=self.n_steps)
-
-        if 'deepspeed' not in sys.modules:
-            raise ModuleNotFoundError(
-                "Detected DeepSpeed is not installed. See https://github.com/microsoft/DeepSpeed")
-
-        # Initialize deepspeed engine
-        self.model, self.peft_optimizer, _, self.peft_lr_scheduler = deepspeed.initialize(
-            config=training_args.deepspeed,
-            model=model,
-            model_parameters=optimizers['model_parameters'] if self.training_args.do_train else None,
-            optimizer=hf_optimizer,
-            lr_scheduler=hf_lr_scheduler
-        )
-
-        if not self.training_args.lora_only:
-            # register inplace grad hook
-            self.grad_func = self.inplace_grad()
-            for n, p in model.named_parameters():
-                if "lora_" not in n and p.requires_grad:
-                    p.register_hook(self.grad_func)
-
-            # self.dummy_optimizer = DeepSpeedZeRoOffload(
-            #     self.model.module,
-            #     timers=self.model.timers if self.model.wall_clock_breakdown() else None,
-            #     ds_config=self.model.config,
-            #     overlap_comm=self.model.zero_overlap_comm(),
-            #     prefetch_bucket_size=self.model.zero_prefetch_bucket_size(),
-            #     max_reuse_distance=self.model.zero_max_reuse_distance(),
-            #     max_live_parameters=self.model.zero_max_live_parameters(),
-            #     param_persistence_threshold=self.model.zero_param_persistence_threshold(),
-            #     model_persistence_threshold=self.model.zero_model_persistence_threshold(),
-            #     offload_param_config=self.model.zero_offload_param(),
-            #     mpu=self.model.mpu
-            # )
+        self.optimizer = LOMO(model, self.lr, training_args.clip_grad_norm, training_args.clip_grad_value)
 
         get_accelerator().empty_cache()
-
-    def inplace_grad(self):
-        # An approximation of in-place grad update under zero3 of deepspeed
-        def func(x):
-            with torch.no_grad():
-                for n, p in self.model.named_parameters():
-                    if "lora_" in n:
-                        continue
-
-                    if p.grad is not None:
-                        torch.distributed.all_reduce(p.grad, op=torch.distributed.ReduceOp.AVG, async_op=False)
-                        if self.gather_norm:
-                            grad_fp32 = p.grad.detach().clone().to(torch.float32)
-                            self.grad_norms.append(torch.norm(grad_fp32, 2.0))
-                            p.grad = None
-                        else:
-                            one_dim_grad = p.grad.view(-1)
-                            partition_size = p.ds_tensor.numel()
-                            start = partition_size * self.training_args.local_rank
-                            end = start + partition_size
-
-                            if end > p.grad.numel():
-                                partitioned_grad = one_dim_grad.narrow(0, start, p.grad.numel() - start)
-                                # partitioned_grad = torch.cat([partitioned_grad, torch.zeros(end - p.grad.numel()).cuda()])
-                                partitioned_p = p.ds_tensor.narrow(0, 0, p.grad.numel() - start)
-                                partitioned_grad_fp32 = partitioned_grad.detach().clone().to(torch.float32)
-                                partitioned_p_fp32 = partitioned_p.detach().clone().to(torch.float32)
-                                if self.training_args.clip_grad_value is not None:
-                                    # Gradients are modified in-place.
-                                    partitioned_grad_fp32.clamp_(min=-self.training_args.clip_grad_value,
-                                                                 max=self.training_args.clip_grad_value)
-                                if self.training_args.clip_grad_norm is not None and self.training_args.clip_grad_norm > 0 and self.clip_coef is not None:
-                                    partitioned_grad_fp32.mul_(self.clip_coef)
-                                partitioned_p_fp32.add_(partitioned_grad_fp32, alpha=-self.lr)
-                                partitioned_p.copy_(partitioned_p_fp32)
-                            else:
-                                partitioned_grad = one_dim_grad.narrow(0, start, partition_size)
-                                partitioned_grad_fp32 = partitioned_grad.detach().clone().to(torch.float32)
-                                if self.training_args.clip_grad_value is not None:
-                                    # Gradients are modified in-place.
-                                    partitioned_grad_fp32.clamp_(min=-self.training_args.clip_grad_value,
-                                                                 max=self.training_args.clip_grad_value)
-                                if self.training_args.clip_grad_norm is not None and self.training_args.clip_grad_norm > 0 and self.clip_coef is not None:
-                                    partitioned_grad_fp32.mul_(self.clip_coef)
-                                ds_tensor_fp32 = p.ds_tensor.detach().clone().to(torch.float32)
-                                ds_tensor_fp32.add_(partitioned_grad_fp32, alpha=-self.lr)
-                                p.ds_tensor.copy_(ds_tensor_fp32)
-                            p.grad = None
-            return x
-
-        return func
 
     def train(self):
         for epoch in range(self.training_args.num_train_epochs):
@@ -202,50 +109,68 @@ class LOMOLoRATrainer:
                     loss = get_loss(outs.logits, batch['labels'], self.training_args.clip_loss_value)
 
                     # update the learning rate
-                    if self.training_args.lora_only:
-                        self.global_step = self.num_steps_per_epoch * epoch + step
+                    self.global_step = self.num_steps_per_epoch * epoch + step
+                    self.lr = self.lr_scheduler.step(self.global_step)
+                    if self.training_args.clip_grad_norm is not None and self.training_args.clip_grad_norm > 0:
+                        self.optimizer.grad_norm(loss)
+                        # self.gather_norm = True
+                        # self.grad_norms = []
+                        # self.loss_scaler.has_overflow_serial = False
+                        # scaled_loss = loss * self.loss_scaler.loss_scale
+                        #
+                        # scaled_loss.backward()
+                        # # update the last one since the hook function will not be called for the last parameter
+                        # self.grad_func(0)
 
-                        loss = self.model.backward(loss)
-                        self.model.step()  # Optimizer step for deepspeed must be called on every step regardless of the value of gradient_accumulation_steps
-                    else:
-                        self.global_step = self.num_steps_per_epoch * epoch + step
-                        self.lr = self.lr_scheduler.step(self.global_step)
+                        if self.optimizer.loss_scaler and self.optimizer.loss_scaler.has_overflow_serial:
+                            print(f"Gradient overflow, skipping step {self.global_step}")
+                            # self.loss_scaler.update_scale(overflow=True)
+                            # with torch.no_grad():
+                            #     for n, p in self.model.named_parameters():
+                            #         p.grad = None
+                            self.model.optimizer.get_param_coordinator(training=True).reset_step()
+                            tqb.set_postfix({'loss': loss.item()})
+                            if self.allow_print:
+                                self.wandb.log(
+                                    {
+                                        'train/loss': loss.item(),
+                                        'train/learning_rate': self.lr,
+                                        'train/global_step': self.global_step,
+                                    },
+                                    step=self.global_step
+                                )
+                            continue
 
-                        if self.training_args.clip_grad_norm is not None and self.training_args.clip_grad_norm > 0:
-                            self.gather_norm = True
-                            self.grad_norms = []
+                        # with torch.no_grad():
+                        #     # The norm is computed over all gradients together, as if they were
+                        #     # concatenated into a single vector. Gradients are modified in-place.
+                        #     self.grad_norms = torch.stack(self.grad_norms)
+                        #     # device = torch.device(f"cuda:{self.training_args.local_rank}")
+                        #     # all_grad_norms = torch.zeros(self.training_args.world_size * self.grad_norms.shape[0], dtype=self.grad_norms.dtype, device=device)
+                        #     # torch.distributed.all_gather_into_tensor(all_grad_norms, self.grad_norms)
+                        #
+                        #     # total_norm = torch.norm(all_grad_norms, 2.0) / self.training_args.world_size
+                        #     total_norm = torch.norm(self.grad_norms, 2.0)
+                        #     self.clip_coef = float(self.training_args.clip_grad_norm) / (total_norm + 1e-6)
+                        #     self.clip_coef = torch.clamp(self.clip_coef, max=1.0)
+                        # self.gather_norm = False
+                        else:
+                            self.model.optimizer.get_param_coordinator(training=True).reset_step()
+                        # 第二次forward
+                        outs = self.model(
+                            input_ids=batch['input_ids'].cuda(),
+                            attention_mask=batch['attention_mask'].cuda(),
+                        )
+                        loss = get_loss(outs.logits, batch['labels'], self.training_args.clip_loss_value)
 
-                            self.model.backward(loss)
-                            # update the last one since the hook function will not be called for the last parameter
-                            self.grad_func(0)
-                            # self.model.optimizer._get_param_coordinator(training=True).reset_step()
-                            # self.dummy_optimizer.get_param_coordinator(training=True).reset_step()
-
-                            with torch.no_grad():
-                                # The norm is computed over all gradients together, as if they were
-                                # concatenated into a single vector. Gradients are modified in-place.
-                                self.grad_norms = torch.stack(self.grad_norms)
-                                device = torch.device(f"cuda:{self.training_args.local_rank}")
-                                all_grad_norms = torch.zeros(self.training_args.world_size * self.grad_norms.shape[0],
-                                                             dtype=self.grad_norms.dtype, device=device)
-                                torch.distributed.all_gather_into_tensor(all_grad_norms, self.grad_norms)
-
-                                total_norm = torch.norm(all_grad_norms, 2.0)
-                                self.clip_coef = float(self.training_args.clip_grad_norm) / (total_norm + 1e-6)
-                                self.clip_coef = torch.clamp(self.clip_coef, max=1.0)
-                            self.gather_norm = False
-
-                            # 第二次forward
-                            outs = self.model(
-                                input_ids=batch['input_ids'].cuda(),
-                                attention_mask=batch['attention_mask'].cuda(),
-                            )
-                            loss = get_loss(outs.logits, batch['labels'], self.training_args.clip_loss_value)
-
-                        # update peft params
-                        loss = self.model.backward(loss)
-                        self.grad_func(0)
-                        self.model.step()  # Optimizer step for deepspeed must be called on every step regardless of the value of gradient_accumulation_steps
+                    # scaled_loss = loss * self.loss_scaler.loss_scale
+                    #
+                    # scaled_loss.backward()
+                    # # update the last one since the hook function will not be called for the last parameter
+                    # self.grad_func(0)
+                    # self.loss_scaler.update_scale(overflow=False)
+                    self.optimizer.fused_backward(loss, self.lr)
+                    self.model.optimizer.get_param_coordinator(training=True).reset_step()
 
                     tqb.set_postfix({'loss': loss.item()})
                     if self.allow_print:
@@ -253,7 +178,6 @@ class LOMOLoRATrainer:
                             {
                                 'train/loss': loss.item(),
                                 'train/learning_rate': self.lr,
-                                'train/hf_learning_rate': self.model.get_lr()[0],
                                 'train/global_step': self.global_step,
                             },
                             step=self.global_step
@@ -479,7 +403,6 @@ class LOMOLoRATrainer:
         output_dir = os.path.join(self.training_args.output_dir, f"checkpoint-{index}")
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
-
         state_dict = OrderedDict() if torch.distributed.get_rank() == 0 else None
         shared_params = {}
 
@@ -506,14 +429,5 @@ class LOMOLoRATrainer:
             self.model.module.config.save_pretrained(output_dir)
             torch.save(state_dict, os.path.join(output_dir, 'pytorch_model.bin'))
             print(f"Save model to {output_dir}")
-
-            # save lora
-            adapter_output_dir = os.path.join(output_dir, 'adapter_model')
-            self.model.module.peft_config['default'].save_pretrained(adapter_output_dir)
-            # if state dict is not what you expected, you can use the following code to get the state dict
-            # engine_state_dict = self.model._zero3_consolidated_16bit_state_dict()
-            lora_state_dict = get_peft_model_state_dict(self.model.module, state_dict)
-            torch.save(lora_state_dict, os.path.join(adapter_output_dir, "adapter_model.bin"))
-            print(f"Save adapter model at {adapter_output_dir}")
 
         torch.distributed.barrier()
