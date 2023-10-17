@@ -10,11 +10,33 @@ AdaLomo 在指令微调和进一步预训练中的结果与 AdamW 相当，但�
 ![AdaLomo](../assets/adalomo_algorithm.png)
 
 ## 依赖
-
 ```shell
 collie-lm
 ```
 
-AdaLomo 将在 [https://github.com/OpenLMLab/collie/blob/dev/collie/optim/adalomo.py](https://github.com/OpenLMLab/collie/blob/dev/collie/optim/adalomo.py) 实现。
+AdaLomo 在 [https://github.com/OpenLMLab/collie/blob/dev/collie/optim/adalomo.py](https://github.com/OpenLMLab/collie/blob/dev/collie/optim/adalomo.py) 中实现。
 
-代码即将发布。
+## 指令微调
+我们使用 Alpaca-GPT4 作为我们的训练数据集，该数据集可在 https://github.com/Instruction-Tuning-with-GPT-4/GPT-4-LLM/blob/main/data/alpaca_gpt4_data.json 获取.
+
+### 下载数据集
+```shell
+cd instruction-tuning
+wget https://github.com/Instruction-Tuning-with-GPT-4/GPT-4-LLM/blob/main/data/alpaca_gpt4_data.json
+```
+
+### 训练
+```shell
+torchrun --nproc_per_node=8 train.py --optim adalomo --model_size 7b
+```
+
+## 继续预训练
+
+### 获取数据集
+
+下载 StarCoder 的 python 子集，并在 `further-pretraining/train.py` 的 `get_dataset()` 中设置路径。
+
+### 训练
+```shell
+torchrun --nproc_per_node=8 train.py --optim adalomo --model_size 7b
+```

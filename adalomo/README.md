@@ -14,63 +14,29 @@ AdaLomo achieves results comparable to AdamW in both instruction-tuning and furt
 collie-lm
 ```
 
-AdaLomo will be implemented at [https://github.com/OpenLMLab/collie/blob/dev/collie/optim/adalomo.py](https://github.com/OpenLMLab/collie/blob/dev/collie/optim/adalomo.py).
+AdaLomo is implemented at [https://github.com/OpenLMLab/collie/blob/dev/collie/optim/adalomo.py](https://github.com/OpenLMLab/collie/blob/dev/collie/optim/adalomo.py).
 
-Code is coming soon.
+## Instruction-tuning
+We use Alpaca-GPT4 as our training dataset, which is available at https://github.com/Instruction-Tuning-with-GPT-4/GPT-4-LLM/blob/main/data/alpaca_gpt4_data.json.
 
-[//]: # (## Run the code)
+### Download the dataset
+```shell
+cd instruction-tuning
+wget https://github.com/Instruction-Tuning-with-GPT-4/GPT-4-LLM/blob/main/data/alpaca_gpt4_data.json
+```
 
-[//]: # ()
-[//]: # (We provide code for fine-tuning Large Language Models &#40;LLMs&#41; using three different approaches: **LOMO**, **LoRA**, and **LoRA + LOMO**.)
+### Training
+```shell
+torchrun --nproc_per_node=8 train.py --optim adalomo --model_size 7b
+```
 
-[//]: # ()
-[//]: # (1. For full parameter fine-tuning using LOMO, the implementation is in `src/lomo_trainer.py`, and you can run:)
+## Further pre-training
 
-[//]: # (```shell)
+### Get dataset
 
-[//]: # (deepspeed --master_port "$port" --include localhost:"$CUDA_VISIBLE_DEVICES" src/train_lomo.py config/args_lomo.yaml)
+Download python subset of StarCoder and set the path in the `get_dataset()` in `further-pretraining/train.py`. 
 
-[//]: # (```)
-
-[//]: # ()
-[//]: # (2. For LoRA and LoRA + LOMO, the implementation is in `src/lomo_lora_trainer.py`, and you can run:)
-
-[//]: # (```shell)
-
-[//]: # (deepspeed --master_port "$port" --include localhost:"$CUDA_VISIBLE_DEVICES" src/train_lomo_lora.py config/args_lomo_lora.yaml)
-
-[//]: # (```)
-
-[//]: # (In the code, we have included the `lora_only` argument in `src/arguments.py`, which controls whether to use LoRA only or LoRA + LOMO. Please note that when `lora_only` is set to `True`, the arguments related to LOMO will not work.)
-
-[//]: # ()
-[//]: # (Besides, we provide a simple `run.sh` script for convenience. You can execute the code using the following command:)
-
-[//]: # (```shell)
-
-[//]: # (bash run.sh)
-
-[//]: # (```)
-
-[//]: # ()
-[//]: # (For data processing, we currently only provide the six datasets of SuperGLUE mentioned in the paper. If you wish to use new datasets, please modify the `Dataset` and `DataCollator` accordingly.)
-
-[//]: # ()
-[//]: # (For evaluation, we currently only provide the `eval_step` codes for [multiple-choice QA]&#40;https://github.com/OpenLMLab/LOMO/blob/91cc71387d0a576c000a7dc568543c4ef22401db/src/lomo_trainer.py#L259-L276&#41; and [generation]&#40;https://github.com/OpenLMLab/LOMO/blob/91cc71387d0a576c000a7dc568543c4ef22401db/src/lomo_trainer.py#L278-L297&#41; tasks. If you have other requirements, please modify the `eval_step` code in the `LOMOTrainer` or `LOMOLoRATrainer` accordingly and provide the necessary `compute_metrics` to the trainer.)
-
-[//]: # (## Reproduce our results)
-
-[//]: # (We provide the sampled datasets used in our experiments [here]&#40;https://drive.google.com/drive/folders/1zV7sXvU7YHKWyS3fYV0yyi7FyTjIpEuO?usp=sharing&#41;.)
-
-[//]: # (Due to the limited computational resources, we reported the highest results obtained from experiments conducted with the same random seed &#40;`42`&#41;.)
-
-[//]: # (We acknolwedge this limitation in our work and plan to conduct repeated experiments in the next version to address it.)
-
-[//]: # (> Feel free to raise issues if you have any questions.)
-
-[//]: # (## Citation)
-
-[//]: # (```text)
-
-[//]: # ()
-[//]: # (```)
+### Training
+```shell
+torchrun --nproc_per_node=8 train.py --optim adalomo --model_size 7b
+```
