@@ -30,6 +30,23 @@ wget https://github.com/Instruction-Tuning-with-GPT-4/GPT-4-LLM/blob/main/data/a
 torchrun --nproc_per_node=8 train.py --optim adalomo --model_size 7b
 ```
 
+### 评估
+评估基于 opencompass。以下是快速安装步骤。
+```shell
+conda create --name opencompass python=3.10 pytorch torchvision pytorch-cuda -c nvidia -c pytorch -y
+conda activate opencompass
+git clone https://github.com/KaiLv69/opencompass opencompass
+cd opencompass
+pip install -e .
+```
+以下是评估步骤。
+```shell
+python run.py configs/eval_collie.py -r
+```
+`-r` 用于恢复之前的评估过程。
+
+您可以参考 `opencompass/configs/eval_collie.py` 了解更多细节。
+
 ## 继续预训练
 
 ### 获取数据集
