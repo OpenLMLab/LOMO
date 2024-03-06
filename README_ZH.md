@@ -18,6 +18,7 @@ from lomo_optim import Lomo
 from lomo_optim import AdaLomo
 ```
 `Lomo`和`AdaLomo`的使用方法与PyTorch的优化器类似，但不完全相同([示例](https://github.com/OpenMOSS/CoLLiE/blob/726ec80d263c1e1c56344dfde5b3c24897daa94d/collie/controller/trainer.py#L469))。
+推荐使用`AdaLomo`并且不加`gradnorm`来获得更好的性能同时维持更高的吞吐量。
 
 # LOMO: LOw-Memory Optimization
 

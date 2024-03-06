@@ -19,6 +19,7 @@ from lomo_optim import AdaLomo
 
 The usage of `Lomo` and `AdaLomo` is similar but not the same as PyTorch's optimizers 
 ([example](https://github.com/OpenMOSS/CoLLiE/blob/726ec80d263c1e1c56344dfde5b3c24897daa94d/collie/controller/trainer.py#L469)).
+We recommend to use `AdaLomo` without `gradnorm` to get better performance and higher throughput.
 
 # LOMO: LOw-Memory Optimization
 
