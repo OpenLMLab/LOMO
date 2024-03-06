@@ -15,7 +15,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "torch", "transformers"
+    "transformers", "torch"
 ]
 dynamic = ["version"]
 
@@ -26,3 +26,6 @@ Repository = "https://github.com/OpenLMLab/LOMO.git"
 
 [tool.setuptools]
 packages = ["lomo_optim"]
+
+[tool.setuptools.dynamic]
+version = {attr = "lomo_optim.__version__"}
