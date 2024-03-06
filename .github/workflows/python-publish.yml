@@ -11,6 +11,8 @@ name: Upload Python Package
 on:
   release:
     types: [published]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -26,14 +28,16 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.x'
+
     - name: Install the dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install build twine
+      run: pip install build twine
+    - uses: gaurav-nelson/github-action-markdown-link-check@v1.0.0
     - name: Build and publish
+      run: python -m build --wheel
+
+    - name: Publish
+      if: github.event_name == 'release'
       env:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-      run: |
-        python -m build --wheel
-        twine upload dist/*
+      run: twine upload dist/*
