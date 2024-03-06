@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lomo-optim"
+authors = [
+    {name = "Kai Lv", email = "klv21@m.fudan.edu.cn"},
+]
+description = "LOMO: LOw-Memory Optimization"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+classifiers = [
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+dependencies = [
+    "transformers", "torch"
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/OpenLMLab/LOMO"
+Documentation = "https://openlmlab-collie.readthedocs.io/zh-cn/latest/api/generated/collie.optim.Lomo.html"
+Repository = "https://github.com/OpenLMLab/LOMO.git"
+
+[tool.setuptools]
+packages = ["lomo_optim"]
+
+[tool.setuptools.dynamic]
+version = {attr = "lomo_optim.__version__"}

@@ -1,1 +1,5 @@
 .idea
+lomo_optim.egg-info
+dist
+build
+__pycache__

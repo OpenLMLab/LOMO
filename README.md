@@ -3,7 +3,23 @@
 This is the implementation for [Full Parameter Fine-Tuning for Large Language Models with Limited Resources](https://arxiv.org/pdf/2306.09782.pdf)
 and [AdaLomo: Low-memory Optimization with Adaptive Learning Rate](https://arxiv.org/pdf/2310.10195.pdf).
 
-LOMO and AdaLomo are integrated in [CoLLiE](https://github.com/OpenLMLab/collie) library, which supports Collaborative Training of Large Language Models in an Efficient Way.
+LOMO and AdaLomo are integrated in [CoLLiE](https://github.com/OpenMOSS/collie) library, which supports Collaborative Training of Large Language Models in an Efficient Way.
+You can also install `lomo-optim` from PyPI using pip.
+
+```bash
+pip install lomo-optim
+```
+
+Then, import `Lomo` or `AdaLomo`.
+
+```python
+from lomo_optim import Lomo
+from lomo_optim import AdaLomo
+```
+
+The usage of `Lomo` and `AdaLomo` is similar but not the same as PyTorch's optimizers 
+([example](https://github.com/OpenMOSS/CoLLiE/blob/726ec80d263c1e1c56344dfde5b3c24897daa94d/collie/controller/trainer.py#L469)).
+We recommend to use `AdaLomo` without `gradnorm` to get better performance and higher throughput.
 
 # LOMO: LOw-Memory Optimization
 
