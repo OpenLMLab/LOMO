@@ -5,6 +5,21 @@ and [AdaLomo: Low-memory Optimization with Adaptive Learning Rate](https://arxiv
 
 LOMO and AdaLomo are integrated in [CoLLiE](https://github.com/OpenLMLab/collie) library, which supports Collaborative Training of Large Language Models in an Efficient Way.
 
+# Usage
+
+Install `lomo-optim` from PyPI using pip.
+
+```bash
+pip install lomo-optim
+```
+
+Then, import `Lomo` or `AdaLomo`.
+
+```python
+from lomo_optim import Lomo
+from lomo_optim import AdaLomo
+```
+
 # LOMO: LOw-Memory Optimization
 
 In this work, we propose a new optimizer, **LO**w-Memory **O**ptimization (**LOMO**), which fuses the gradient computation and the parameter update in one step to reduce memory usage.

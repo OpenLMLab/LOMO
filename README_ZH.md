@@ -6,6 +6,21 @@
 
 LOMO和AdaLomo已经集成到了 [CoLLiE](https://github.com/OpenLMLab/collie) (Collaborative Training of Large Language Models in an Efficient Way) 中。
 
+# 使用方法
+
+使用 pip 从 PyPI 安装 `lomo-optim` 包。
+
+```bash
+pip install lomo-optim
+```
+
+然后，从 `lomo_optim` 中导入 `Lomo` 或 `AdaLomo`
+
+```python
+from lomo_optim import Lomo
+from lomo_optim import AdaLomo
+```
+
 # LOMO: LOw-Memory Optimization
 
 在这个工作中，我们提出了一个新的优化器，**LO**w-Memory **O**ptimization (**LOMO**)，它将梯度计算和参数更新融合在一步中，以减少内存使用。
