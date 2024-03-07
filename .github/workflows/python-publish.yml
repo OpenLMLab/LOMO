@@ -31,7 +31,7 @@ jobs:
 
     - name: Install the dependencies
       run: pip install build twine
-    - uses: gaurav-nelson/github-action-markdown-link-check@v1.0.0
+    - uses: gaurav-nelson/github-action-markdown-link-check@v1
     - name: Build and publish
       run: python -m build --wheel
 
