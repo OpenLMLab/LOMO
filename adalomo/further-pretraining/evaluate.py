@@ -20,7 +20,7 @@ class EvaluatorForPretraining(Evaluator):
 
     @staticmethod
     @torch.no_grad()
-    def eval_fn(evaluator, batch: Tuple) -> Any:
+    def eval_fn(evaluator, batch: Dict) -> Any:
         """一次验证的基本单元
 
         :param evaluator: 训练器
@@ -56,9 +56,10 @@ class EvaluatorForPretraining(Evaluator):
         ppl = torch.exp(loss)
 
         # calculate acc
-        pred = torch.argmax(outputs["logits"], dim=-1)
-        valid_mask = (batch['labels'] != -100)
-        correct = (pred == batch['labels']) & valid_mask
+        pred = torch.argmax(outputs["logits"], dim=-1)[..., :-1].contiguous()  # bs seq_len
+        shifted_labels = batch['labels'][..., 1:].contiguous().to(pred.device)
+        valid_mask = (shifted_labels != -100)
+        correct = (pred == shifted_labels) & valid_mask
         correct_count = correct.float().sum().item()
         total = valid_mask.float().sum().item()
         return {
