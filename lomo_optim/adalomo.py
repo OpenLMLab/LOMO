@@ -82,17 +82,18 @@ class AdaLomo(Optimizer):
 
         # register hook function, which will be called through the backward process
         for n, p in self.model.named_parameters():
-            if len(p.ds_shape) == 1:
-                self.exp_avg_sq[n] = torch.zeros(
-                    p.ds_shape[0], dtype=torch.float32
-                ).cuda()
+            if self.zero3_enabled:
+                if len(p.ds_shape) == 1:
+                    self.exp_avg_sq[n] = torch.zeros(p.ds_shape[0], dtype=torch.float32).cuda()
+                else:
+                    self.exp_avg_sq_row[n] = torch.zeros(p.ds_shape[0], dtype=torch.float32).cuda()
+                    self.exp_avg_sq_col[n] = torch.zeros(p.ds_shape[1], dtype=torch.float32).cuda()
             else:
-                self.exp_avg_sq_row[n] = torch.zeros(
-                    p.ds_shape[0], dtype=torch.float32
-                ).cuda()
-                self.exp_avg_sq_col[n] = torch.zeros(
-                    p.ds_shape[1], dtype=torch.float32
-                ).cuda()
+                if len(p.data.shape) == 1:
+                    self.exp_avg_sq[n] = torch.zeros(p.data.shape[0], dtype=torch.float32).cuda()
+                else:
+                    self.exp_avg_sq_row[n] = torch.zeros(p.data.shape[0], dtype=torch.float32).cuda()
+                    self.exp_avg_sq_col[n] = torch.zeros(p.data.shape[1], dtype=torch.float32).cuda()
 
             if p.requires_grad:
                 p.register_hook(self.grad_func)
