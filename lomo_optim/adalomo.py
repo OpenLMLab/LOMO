@@ -249,7 +249,12 @@ class AdaLomo(Optimizer):
                                 # Normalize the gradient according to its norm (computed in another pass)
                                 grad_fp32.mul_(self.clip_coef)
 
-                            beta2t = 1.0 - math.pow(self.step_num, self.decay_rate)
+                            # To avoid math errors for edge cases
+                            if self.step_num == 0 and self.decay_rate < 0:
+                                decay_rate = - self.decay_rate
+                            else:
+                                decay_rate = self.decay_rate
+                            beta2t = 1.0 - math.pow(self.step_num, decay_rate)
                             update = (grad_fp32**2) + self.eps[0]  # 改成addcmul_
 
                             if len(p.ds_shape) > 1:
