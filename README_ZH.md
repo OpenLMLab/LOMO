@@ -1,11 +1,14 @@
 [**English**](./README.md) | [**中文**](./README_ZH.md)
 
-# LOMO: LOw-Memory Optimization
-
 论文 [Full Parameter Fine-Tuning for Large Language Models with Limited Resources](https://arxiv.org/pdf/2306.09782.pdf) 和 [AdaLomo: Low-memory Optimization with Adaptive Learning Rate](https://arxiv.org/pdf/2310.10195.pdf) 的实现.
 
-LOMO和AdaLomo已经集成到了 [CoLLiE](https://github.com/OpenLMLab/collie) (Collaborative Training of Large Language Models in an Efficient Way) 中。
-也可以使用 pip 从 PyPI 安装 `lomo-optim` 包。
+# 新闻
+- LOMO 和 AdaLomo 集成到了 [`transformers`](https://huggingface.co/docs/transformers/main/en/trainer#lomo-optimizer) 和 [`accelerate`](https://huggingface.co/docs/accelerate/main/en/package_reference/accelerator#accelerate.Accelerator.lomo_backward) 中.
+- 发布了 PyPI 包 `lomo-optim`.
+- LOMO 和 AdaLomo 已经集成到了 [`CoLLiE`](https://github.com/OpenLMLab/collie) (Collaborative Training of Large Language Models in an Efficient Way) 中。
+
+# Usage
+可以使用 pip 从 PyPI 安装 `lomo-optim` 包。
 
 ```bash
 pip install lomo-optim
@@ -17,8 +20,8 @@ pip install lomo-optim
 from lomo_optim import Lomo
 from lomo_optim import AdaLomo
 ```
-`Lomo`和`AdaLomo`的使用方法与PyTorch的优化器类似，但不完全相同([示例](https://github.com/OpenMOSS/CoLLiE/blob/726ec80d263c1e1c56344dfde5b3c24897daa94d/collie/controller/trainer.py#L469))。
-推荐使用`AdaLomo`并且不加`gradnorm`来获得更好的性能同时维持更高的吞吐量。
+`Lomo` 和 `AdaLomo` 的使用方法与 PyTorch 的优化器类似，但不完全相同([示例](https://github.com/OpenMOSS/CoLLiE/blob/726ec80d263c1e1c56344dfde5b3c24897daa94d/collie/controller/trainer.py#L469))。
+推荐使用 `AdaLomo` 并且不加 `gradnorm` 来获得更好的性能同时维持更高的吞吐量。
 
 # LOMO: LOw-Memory Optimization
 
@@ -50,6 +53,12 @@ AdaLomo的代码在 [adalomo](adalomo) 文件夹中。
   title={Full Parameter Fine-tuning for Large Language Models with Limited Resources},
   author={Lv, Kai and Yang, Yuqing and Liu, Tengxiao and Gao, Qinghui and Guo, Qipeng and Qiu, Xipeng},
   journal={arXiv preprint arXiv:2306.09782},
+  year={2023}
+}
+@article{lv2023adalomo,
+  title={AdaLomo: Low-memory Optimization with Adaptive Learning Rate},
+  author={Lv, Kai and Yan, Hang and Guo, Qipeng and Lv, Haijun and Qiu, Xipeng},
+  journal={arXiv preprint arXiv:2310.10195},
   year={2023}
 }
 ```

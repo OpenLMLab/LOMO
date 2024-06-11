@@ -3,8 +3,13 @@
 This is the implementation for [Full Parameter Fine-Tuning for Large Language Models with Limited Resources](https://arxiv.org/pdf/2306.09782.pdf)
 and [AdaLomo: Low-memory Optimization with Adaptive Learning Rate](https://arxiv.org/pdf/2310.10195.pdf).
 
-LOMO and AdaLomo are integrated in [CoLLiE](https://github.com/OpenMOSS/collie) library, which supports Collaborative Training of Large Language Models in an Efficient Way.
-You can also install `lomo-optim` from PyPI using pip.
+# News
+- LOMO and AdaLomo were integrated in [`transformers`](https://huggingface.co/docs/transformers/main/en/trainer#lomo-optimizer) and [`accelerate`](https://huggingface.co/docs/accelerate/main/en/package_reference/accelerator#accelerate.Accelerator.lomo_backward).
+- PyPI package `lomo-optim` was released.
+- LOMO and AdaLomo were integrated in [`CoLLiE`](https://github.com/OpenMOSS/collie) library, which supports Collaborative Training of Large Language Models in an Efficient Way.
+
+# Usage
+You can install `lomo-optim` from PyPI using pip.
 
 ```bash
 pip install lomo-optim
@@ -52,6 +57,12 @@ The code for AdaLomo is in [adalomo](adalomo) folder.
   title={Full Parameter Fine-tuning for Large Language Models with Limited Resources},
   author={Lv, Kai and Yang, Yuqing and Liu, Tengxiao and Gao, Qinghui and Guo, Qipeng and Qiu, Xipeng},
   journal={arXiv preprint arXiv:2306.09782},
+  year={2023}
+}
+@article{lv2023adalomo,
+  title={AdaLomo: Low-memory Optimization with Adaptive Learning Rate},
+  author={Lv, Kai and Yan, Hang and Guo, Qipeng and Lv, Haijun and Qiu, Xipeng},
+  journal={arXiv preprint arXiv:2310.10195},
   year={2023}
 }
 ```
